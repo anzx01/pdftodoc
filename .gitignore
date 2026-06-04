@@ -1,0 +1,29 @@
+# Python 虚拟环境
+.venv/
+
+# 运行时日志（仅保留目录占位）
+logs/*
+!logs/.gitkeep
+
+# PaddleOCR 离线模型（体积大，不入库）
+assets/models/*
+!assets/models/.gitkeep
+
+# 打包产物
+build/
+dist/
+*.spec.bak
+
+# Python 缓存
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 编辑器
+.idea/
+.vscode/
+*.swp

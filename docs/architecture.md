@@ -1,0 +1,71 @@
+# pdftodoc 架构说明
+
+桌面 GUI 工具，把 PDF 转换为可编辑 DOCX。按 PDF 内容自动选路：
+
+- **文本型**（含文字图层）→ `pdf2docx`，保留版式。
+- **扫描型**（纯图片）→ 逐页渲染 + PaddleOCR 识别 → 生成 DOCX。
+
+## 分层结构
+
+```
+src/pdftodoc/
+├─ app.py            应用装配：日志 → QApplication → 主窗口
+├─ models/           纯数据结构（强类型 dataclass，frozen）
+│  ├─ enums.py       PdfType / ConversionStage / TaskStatus
+│  ├─ task.py        ConversionTask / ConversionOptions
+│  ├─ result.py      DetectionResult / PageResult / ConversionResult
+│  └─ progress.py    ProgressEvent / ErrorInfo（跨线程传递）
+├─ core/             业务核心（不依赖 Qt）
+│  ├─ detector.py    PDF 类型检测（PyMuPDF 抽样统计文字量）
+│  ├─ service.py     编排器：检测 → 分派引擎 → 进度/取消
+│  ├─ engines/       text_engine（pdf2docx） / ocr_engine（扫描型）
+│  └─ ocr/           renderer（渲染）/ recognizer（PaddleOCR 封装）/ docx_builder
+├─ gui/              PySide6 界面（main_window / widgets / worker）
+└─ infra/            logging_config / paths（兼容 PyInstaller）
+```
+
+依赖方向单向向内：`gui → core → models`，`infra` 为横切。GUI 永远不直接接触
+`pdf2docx`/`paddle`，只通过 `ConversionService` 这一唯一桥梁。
+
+## 转换链路
+
+```
+ConversionService.convert(task)
+  │  DETECTING      detector.detect() → DetectionResult
+  ├─ 文本型/混合/未知 ─→ TextEngine          (CONVERTING_TEXT → DONE)
+  └─ 扫描型/强制OCR ──→ OcrEngine
+                         每页: RENDERING → RECOGNIZING
+                         收尾: BUILDING_DOCX → DONE
+```
+
+- **类型判定**：抽样各页去空白字符数，按「平均字符数 + 有文字页占比」分类；
+  大文件（>30 页）抽前/中/后各 5 页，避免检测过慢。混合型按文本型处理并告警。
+- **OCR 引擎**：`renderer.render_page`（PyMuPDF 按 DPI 渲染为 RGB numpy）→
+  `recognizer.recognize`（PaddleOCR）→ `docx_builder.build_docx`（python-docx 逐页分页）。
+- **取消**：在每页边界检查 `is_cancelled`，尽量即时响应。文本型受 pdf2docx 限制
+  仅能在开始前取消（MVP 约束）。
+
+## 线程模型
+
+GUI 用 `QObject + moveToThread` 把转换放到后台线程：
+
+- 进度/结果/错误经 Qt 信号回 UI（自动 QueuedConnection）。
+- 取消用 `threading.Event`，UI 线程直接 `set()` 即时生效，不依赖 worker 事件循环。
+
+## OCR 离线模型
+
+`PaddleRecognizer` 在首次识别时把 `PADDLE_PDX_CACHE_HOME` 固定到 `assets/models/`，
+与 `scripts/fetch_models.sh` 预下载目录一致——预下载后即可断网运行。
+PaddleOCR 与 paddle 为重依赖，故识别器**懒加载**：无扫描件时不引入其开销。
+
+## 设计约束
+
+- 数据结构全部强类型（frozen dataclass），跨模块用中性结构 `OcrPage` 解耦 paddle。
+- paddle 调用集中隔离在 `recognizer.py` 一处，便于测试注入 fake、便于适配版本变动。
+- 单文件 < 300 行；每层目录文件数受控。
+
+## 测试策略
+
+`tests/` 用 PyMuPDF 动态生成文本型/扫描型样例 PDF（不入库二进制）。OCR 链路注入
+`FakeRecognizer`，配合真实 renderer/docx_builder 跑端到端，无需真实 paddle 即可验证
+分派、分页、取消与产物。运行：`bash scripts/test.sh`。

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/stdnjl status)",
+      "Bash(git -C /Users/stdnjl log --oneline -10)"
+    ]
+  }
+}

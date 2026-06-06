@@ -31,6 +31,17 @@ class FakeRecognizer:
         return (f"第{self.calls}页识别文本",)
 
 
+class CapturingRecognizer:
+    """记录引擎传入的图片均值，验证 OCR 前处理是否生效。"""
+
+    def __init__(self) -> None:
+        self.means: list[float] = []
+
+    def recognize(self, image: np.ndarray) -> tuple[str, ...]:
+        self.means.append(float(image.mean()))
+        return ("识别文本",)
+
+
 def test_render_page_shape(scanned_pdf: Path) -> None:
     doc = fitz.open(scanned_pdf)
     try:
@@ -156,6 +167,23 @@ def test_ocr_engine_end_to_end(scanned_pdf: Path, tmp_path: Path) -> None:
     assert fake.calls == 2
     assert len(result.pages) == 2
     assert result.pages[0].line_count == 1
+
+
+def test_ocr_engine_wipes_light_watermark_before_recognition(
+    scanned_pdf: Path, tmp_path: Path
+) -> None:
+    dst = tmp_path / "out.docx"
+    recognizer = CapturingRecognizer()
+
+    result = OcrEngine(recognizer=recognizer).convert(
+        ConversionTask(scanned_pdf, dst, ConversionOptions(preserve_scan_layout=False)),
+        lambda _: None,
+        lambda: False,
+    )
+
+    assert result.status is TaskStatus.SUCCESS
+    assert recognizer.means
+    assert min(recognizer.means) > 250.0
 
 
 def test_ocr_engine_cancel(scanned_pdf: Path, tmp_path: Path) -> None:

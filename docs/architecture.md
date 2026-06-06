@@ -40,7 +40,9 @@ ConversionService.convert(task)
 ```
 
 - **类型判定**：抽样各页去空白字符数，按「平均字符数 + 有文字页占比」分类；
-  大文件（>30 页）抽前/中/后各 5 页，避免检测过慢。混合型按文本型处理并告警。
+  大文件默认抽前/中/后各 3 页，避免检测过慢。混合型按文本型处理并告警。
+- **文本型提速**：文本型 PDF 页数达到阈值时自动启用 `pdf2docx` 多进程；
+  小文件保持单进程，避免进程启动成本超过收益。
 - **OCR 重建**：默认使用 `renderer.render_page` →
   `recognizer.recognize_layout`（PaddleOCR 文本+坐标）→ `table_detector.detect_tables` →
   `seal_detector.detect_seals`（裁剪公章）→ `postprocess.clean_ocr_lines`（过滤公章碎字、
@@ -62,6 +64,8 @@ GUI 用 `QObject + moveToThread` 把转换放到后台线程：
 `PaddleRecognizer` 在首次识别时把 `PADDLE_PDX_CACHE_HOME` 固定到 `assets/models/`，
 与 `scripts/fetch_models.sh` 预下载目录一致——预下载后即可断网运行。
 PaddleOCR 与 paddle 为重依赖，故识别器**懒加载**：文本型 PDF 与整页图片兜底模式不会加载 paddle。
+`ocr_cpu_threads=0` 表示按本机 CPU 自动选择线程数，当前默认最多使用 8 个推理线程；
+识别批量默认为 8，以提高多行文本识别吞吐。
 
 ## 设计约束
 

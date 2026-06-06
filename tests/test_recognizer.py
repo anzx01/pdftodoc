@@ -29,6 +29,7 @@ def test_paddle_recognizer_uses_local_mobile_models(
             return [{"rec_texts": ["  第一行  ", "", "第二行"]}]
 
     monkeypatch.setattr(recognizer, "models_dir", lambda: tmp_path)
+    monkeypatch.setattr(recognizer.os, "cpu_count", lambda: 16)
     monkeypatch.setitem(sys.modules, "paddleocr", SimpleNamespace(PaddleOCR=FakePaddleOCR))
 
     lines = recognizer.PaddleRecognizer().recognize(np.zeros((8, 8, 3), dtype=np.uint8))
@@ -40,7 +41,32 @@ def test_paddle_recognizer_uses_local_mobile_models(
     assert created["text_recognition_model_dir"] == str(rec_dir)
     assert created["text_det_limit_side_len"] == 960
     assert created["text_det_limit_type"] == "max"
-    assert created["cpu_threads"] == 2
+    assert created["text_recognition_batch_size"] == 8
+    assert created["cpu_threads"] == 8
     assert created["enable_mkldnn"] is False
     assert "lang" not in created
     assert "ocr_version" not in created
+
+
+def test_paddle_recognizer_keeps_explicit_cpu_threads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    created: dict[str, object] = {}
+
+    class FakePaddleOCR:
+        def __init__(self, **kwargs: object) -> None:
+            created.update(kwargs)
+
+        def predict(self, _image: np.ndarray) -> list[dict[str, list[str]]]:
+            return [{"rec_texts": ["文本"]}]
+
+    monkeypatch.setattr(recognizer, "models_dir", lambda: tmp_path)
+    monkeypatch.setattr(recognizer.os, "cpu_count", lambda: 16)
+    monkeypatch.setitem(sys.modules, "paddleocr", SimpleNamespace(PaddleOCR=FakePaddleOCR))
+
+    recognizer.PaddleRecognizer(cpu_threads=3, rec_batch_size=6).recognize(
+        np.zeros((8, 8, 3), dtype=np.uint8)
+    )
+
+    assert created["cpu_threads"] == 3
+    assert created["text_recognition_batch_size"] == 6

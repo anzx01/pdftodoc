@@ -3,7 +3,7 @@
 策略：用 PyMuPDF 逐页提取文本，统计去空白后的字符数。
 - 单页字符数 >= min_page_chars 视为「有文字页」。
 - 全文（抽样）平均字符数与有文字页占比共同决定类型。
-大文件（> SAMPLE_THRESHOLD 页）抽样前/中/后各若干页，避免检测过慢。
+大文件按配置抽样前/中/后各若干页，避免检测过慢。
 """
 
 import logging
@@ -17,18 +17,17 @@ from pdftodoc.models.task import ConversionOptions
 
 logger = logging.getLogger(__name__)
 
-SAMPLE_THRESHOLD = 30   # 超过此页数启用抽样
-SAMPLE_PER_ZONE = 5     # 前/中/后各抽取的页数
 SCANNED_RATIO_MAX = 0.3  # 有文字页占比低于此值且平均字符少时判为扫描型
 
 _WS = re.compile(r"\s+")
 
 
-def _select_sample(page_count: int) -> tuple[int, ...]:
-    """选择参与统计的页索引。小文件全选，大文件抽前/中/后各 SAMPLE_PER_ZONE 页。"""
-    if page_count <= SAMPLE_THRESHOLD:
+def _select_sample(page_count: int, options: ConversionOptions) -> tuple[int, ...]:
+    """选择参与统计的页索引。小文件全选，大文件抽前/中/后若干页。"""
+    threshold = max(1, options.detect_sample_threshold)
+    if page_count <= threshold:
         return tuple(range(page_count))
-    n = SAMPLE_PER_ZONE
+    n = max(1, options.detect_sample_per_zone)
     mid = page_count // 2
     indices = set(range(n))
     indices.update(range(mid - n // 2, mid - n // 2 + n))
@@ -54,7 +53,7 @@ def detect(pdf_path: str, options: ConversionOptions) -> DetectionResult:
         if page_count == 0:
             return DetectionResult(PdfType.UNKNOWN, 0, 0, 0.0, 0.0)
 
-        sample = _select_sample(page_count)
+        sample = _select_sample(page_count, options)
         char_counts = [len(_WS.sub("", doc[i].get_text("text"))) for i in sample]
     finally:
         doc.close()

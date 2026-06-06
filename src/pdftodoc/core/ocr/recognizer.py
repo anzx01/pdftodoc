@@ -37,9 +37,9 @@ class PaddleRecognizer:
         self,
         lang: str = "ch",
         ocr_version: str = "PP-OCRv4",
-        cpu_threads: int = 2,
+        cpu_threads: int = 0,
         det_limit_side_len: int = 960,
-        rec_batch_size: int = 4,
+        rec_batch_size: int = 8,
     ) -> None:
         self._lang = lang
         self._ocr_version = ocr_version
@@ -59,6 +59,7 @@ class PaddleRecognizer:
 
         from paddleocr import PaddleOCR
 
+        cpu_threads = _resolve_cpu_threads(self._cpu_threads)
         kwargs: dict[str, object] = {
             "use_doc_orientation_classify": False,
             "use_doc_unwarping": False,
@@ -67,7 +68,7 @@ class PaddleRecognizer:
             "text_det_limit_type": "max",
             "text_recognition_batch_size": self._rec_batch_size,
             "device": "cpu",
-            "cpu_threads": self._cpu_threads,
+            "cpu_threads": cpu_threads,
             "enable_hpi": False,
             "enable_mkldnn": False,  # 禁用 mkldnn 避开 PIR+oneDNN bug
         }
@@ -75,7 +76,7 @@ class PaddleRecognizer:
 
         logger.info(
             "初始化 PaddleOCR(lang=%s, version=%s, cpu_threads=%d, cache=%s)",
-            self._lang, self._ocr_version, self._cpu_threads, cache,
+            self._lang, self._ocr_version, cpu_threads, cache,
         )
         self._ocr = PaddleOCR(**kwargs)
         return self._ocr
@@ -118,6 +119,14 @@ class PaddleRecognizer:
 def _existing_model_dir(cache: Path, model_name: str) -> Path | None:
     path = cache / _MODEL_DIR / model_name
     return path if path.is_dir() else None
+
+
+def _resolve_cpu_threads(requested: int) -> int:
+    """Resolve 0/negative CPU thread settings to a fast-but-responsive default."""
+    if requested > 0:
+        return requested
+    cpu_count = os.cpu_count() or 4
+    return max(2, min(8, cpu_count - 2 if cpu_count > 4 else cpu_count))
 
 
 def _box_at(boxes: object, index: int) -> BBox | None:

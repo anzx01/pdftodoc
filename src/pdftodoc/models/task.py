@@ -11,13 +11,21 @@ class ConversionOptions:
 
     ocr_lang: str = "ch"               # PaddleOCR 语言
     ocr_version: str = "PP-OCRv4"      # 默认用轻量移动端模型，避免 v5 server 在 CPU 上卡顿
-    ocr_cpu_threads: int = 2           # OCR CPU 线程数，限制资源占用
+    ocr_cpu_threads: int = 0           # OCR CPU 线程数；0 表示按本机 CPU 自动提速
     ocr_det_limit_side_len: int = 960  # 文本检测最长边限制，降低扫描件推理成本
-    ocr_rec_batch_size: int = 4        # 文本识别批大小，兼顾速度与内存
+    ocr_rec_batch_size: int = 8        # 文本识别批大小，兼顾速度与内存
+    text_multi_processing: bool = True # 文本型 PDF 页数较多时启用 pdf2docx 多进程
+    text_cpu_count: int = 0            # 文本型 PDF 转换进程数；0 表示按本机 CPU 自动选择
+    text_multi_process_min_pages: int = 8  # 小文件不开多进程，避免启动成本反而变慢
+    detect_sample_threshold: int = 16  # 大于此页数时只抽样检测 PDF 类型
+    detect_sample_per_zone: int = 3    # 大文档按前/中/后各抽取的页数
     scanned_text_threshold: int = 50   # 全文平均每页字符数阈值（低于则倾向扫描型）
     text_page_ratio_min: float = 0.6   # 判为文本型所需的「有文字页」占比
     min_page_chars: int = 20           # 单页≥此字符数才算「有文字页」
     render_dpi: int = 120              # 扫描件渲染 DPI；OCR 内部会再按最长边缩放
+    wipe_light_watermark: bool = True  # OCR 前去除浅色文档水印，提升扫描件识别质量
+    watermark_black_point: int = 108   # 浅色水印预处理黑场参数
+    watermark_white_point: int = 164   # 浅色水印预处理白场参数
     preserve_scan_layout: bool = False # 扫描件默认 OCR 重建，保留可编辑文字
     layout_render_dpi: int = 200       # 版式优先模式的整页图片渲染 DPI
     force_ocr: bool = False            # 强制走 OCR（忽略检测结果）

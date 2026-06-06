@@ -26,6 +26,7 @@ from pdftodoc.core.ocr.renderer import (
 )
 from pdftodoc.core.ocr.seal_detector import detect_seals
 from pdftodoc.core.ocr.table_detector import detect_tables
+from pdftodoc.core.ocr.watermark import wipe_light_watermark
 from pdftodoc.models.enums import ConversionStage, PdfType, TaskStatus
 from pdftodoc.models.progress import ProgressEvent
 from pdftodoc.models.result import ConversionResult, PageResult
@@ -81,17 +82,26 @@ class OcrEngine:
                     return self._cancelled(task, page_count)
                 self._emit(on_progress, task, ConversionStage.RENDERING, step, total, page_index)
                 image = render_page(doc, page_index, opts.render_dpi)
+                ocr_image = (
+                    wipe_light_watermark(
+                        image,
+                        opts.watermark_black_point,
+                        opts.watermark_white_point,
+                    )
+                    if opts.wipe_light_watermark
+                    else image
+                )
 
                 if is_cancelled():
                     return self._cancelled(task, page_count)
                 self._emit(
                     on_progress, task, ConversionStage.RECOGNIZING, step + 1, total, page_index
                 )
-                raw_lines = self._recognize_page(recognizer, image)
+                raw_lines = self._recognize_page(recognizer, ocr_image)
                 seals = detect_seals(image, page_index)
                 text_lines = clean_ocr_lines(raw_lines, seals)
                 lines = tuple(line.text for line in text_lines)
-                tables = detect_tables(image, text_lines)
+                tables = detect_tables(ocr_image, text_lines)
                 page = doc[page_index]
                 pages.append(
                     OcrPage(

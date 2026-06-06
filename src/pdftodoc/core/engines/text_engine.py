@@ -5,6 +5,7 @@ pdf2docx 的 Converter.convert 不支持逐页中断与细粒度进度回调，
 """
 
 import logging
+import os
 import time
 
 from pdf2docx import Converter
@@ -16,6 +17,20 @@ from pdftodoc.models.result import ConversionResult
 from pdftodoc.models.task import ConversionTask
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_worker_count(requested: int) -> int:
+    """Resolve 0/negative worker settings to a fast default for pdf2docx."""
+    if requested > 0:
+        return requested
+    cpu_count = os.cpu_count() or 4
+    return max(2, min(8, cpu_count - 2 if cpu_count > 4 else cpu_count))
+
+
+def _selected_page_count(start: int, end_exclusive: int | None, page_count: int) -> int:
+    first = max(0, start)
+    last_exclusive = page_count if end_exclusive is None else min(end_exclusive, page_count)
+    return max(0, last_exclusive - first)
 
 
 def _cancelled_result(task: ConversionTask, page_count: int) -> ConversionResult:
@@ -52,7 +67,23 @@ class TextEngine:
                 task.task_id, ConversionStage.CONVERTING_TEXT, 0, page_count, "开始转换",
             ))
             end = opts.end_page + 1 if opts.end_page is not None else None
-            cv.convert(str(task.dst_docx), start=opts.start_page, end=end)
+            selected_pages = _selected_page_count(opts.start_page, end, page_count)
+            use_multi_processing = (
+                opts.text_multi_processing
+                and selected_pages >= opts.text_multi_process_min_pages
+            )
+            worker_count = _resolve_worker_count(opts.text_cpu_count)
+            logger.info(
+                "文本型转换参数: pages=%d multi_processing=%s cpu_count=%d",
+                selected_pages, use_multi_processing, worker_count,
+            )
+            cv.convert(
+                str(task.dst_docx),
+                start=opts.start_page,
+                end=end,
+                multi_processing=use_multi_processing,
+                cpu_count=worker_count,
+            )
         finally:
             cv.close()
 

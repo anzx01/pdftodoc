@@ -5,6 +5,9 @@
 logs/*
 !logs/.gitkeep
 
+# 转换/调试输出
+downloads/
+
 # PaddleOCR 离线模型（体积大，不入库）
 assets/models/*
 !assets/models/.gitkeep

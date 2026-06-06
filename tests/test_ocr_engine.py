@@ -120,7 +120,6 @@ def test_build_docx_writes_positioned_text_layer(tmp_path: Path) -> None:
         image_height_px=100,
         page_width_pt=100.0,
         page_height_pt=100.0,
-        page_png=png,
         seals=(SealImage(0, png, (40, 50, 70, 80)),),
     )
 

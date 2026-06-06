@@ -1,19 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
+
 from PyInstaller.utils.hooks import collect_all
 
-datas = []
+datas = [("assets", "assets")]
 binaries = []
-hiddenimports = ['_ssl']
-tmp_ret = collect_all('easyocr')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('ssl')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('certifi')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+hiddenimports = ["_ssl"]
+
+for package in ("paddleocr", "paddlex", "paddle"):
+    collected = collect_all(package)
+    datas += collected[0]
+    binaries += collected[1]
+    hiddenimports += collected[2]
 
 
 a = Analysis(
-    ['main.py'],
+    ["main.py"],
     pathex=[],
     binaries=binaries,
     datas=datas,
@@ -32,7 +33,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='pdftodoc',
+    name="pdftodoc",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -51,5 +52,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='pdftodoc',
+    name="pdftodoc",
 )

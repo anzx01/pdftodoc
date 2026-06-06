@@ -21,16 +21,8 @@ echo "[build] 清理上次产物 ..."
 rm -rf build dist
 
 echo "[build] 运行 PyInstaller（onedir，GUI 无控制台）..."
-# paddle 系列需 --collect-all 收齐数据/动态库
 SITE_PACKAGES="$(uv run python -c 'import sysconfig; k="purelib"; print(sysconfig.get_paths()[k])')"
-uv run pyinstaller \
-    --name pdftodoc \
-    --noconfirm \
-    --windowed \
-    --collect-all paddleocr \
-    --collect-all paddlex \
-    --collect-all paddle \
-    main.py
+uv run pyinstaller --noconfirm pdftodoc.spec
 
 # 修复1：paddle/libs DLL 路径
 echo "[build] 修复 paddle/libs DLL 路径 ..."

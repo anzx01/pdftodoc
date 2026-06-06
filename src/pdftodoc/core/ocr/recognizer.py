@@ -1,69 +1,139 @@
 """文本识别器：把单张图片识别为按阅读顺序的文本行。
 
-PaddleOCR 是重依赖且首次初始化很慢，故在此懒加载并集中隔离：
-- ocr_engine 只依赖 TextRecognizer 协议，不直接 import paddle；
-- 单元测试可注入 fake 识别器，无需真实 paddle 即可跑通整条链路。
-
-PaddleOCR 版本约束：3.0.x（predict() 接口、结果以 rec_texts 暴露文本行）。
-若官方 API 在小版本间变动，仅需修改本文件的 _ensure / recognize。
+PaddleOCR 是重依赖且首次初始化很慢，故在此懒加载并集中隔离。
 """
 
 import logging
 import os
-from typing import Protocol
+from pathlib import Path
+from collections.abc import Iterable
+from typing import Any, Protocol, cast
 
 import numpy as np
+from numpy.typing import NDArray
 
+from pdftodoc.core.ocr import BBox, OcrLine
 from pdftodoc.infra.paths import models_dir
 
 logger = logging.getLogger(__name__)
+
+_MODEL_DIR = "official_models"
+_KNOWN_MODELS = {
+    ("ch", "PP-OCRv4"): ("PP-OCRv4_mobile_det", "PP-OCRv4_mobile_rec"),
+}
 
 
 class TextRecognizer(Protocol):
     """识别器协议：输入 RGB 图，输出按阅读顺序的非空文本行。"""
 
-    def recognize(self, image: np.ndarray) -> tuple[str, ...]:
+    def recognize(self, image: NDArray[np.uint8]) -> tuple[str, ...]:
         ...
 
 
 class PaddleRecognizer:
     """PaddleOCR 封装。paddle 在首次 recognize 时才加载，构造本身很轻。"""
 
-    def __init__(self, lang: str = "ch") -> None:
+    def __init__(
+        self,
+        lang: str = "ch",
+        ocr_version: str = "PP-OCRv4",
+        cpu_threads: int = 2,
+        det_limit_side_len: int = 960,
+        rec_batch_size: int = 4,
+    ) -> None:
         self._lang = lang
+        self._ocr_version = ocr_version
+        self._cpu_threads = cpu_threads
+        self._det_limit_side_len = det_limit_side_len
+        self._rec_batch_size = rec_batch_size
         self._ocr: object | None = None
 
     def _ensure(self) -> object:
         if self._ocr is not None:
             return self._ocr
 
-        # 把 PaddleX 模型缓存固定到项目内 assets/models：fetch_models.sh 预下载
-        # 与运行时定位走同一目录 —— 已下载则断网可用，未下载则首次联网拉取到此。
         cache = models_dir()
         cache.mkdir(parents=True, exist_ok=True)
         os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(cache))
+        os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
         from paddleocr import PaddleOCR
 
-        # 仅做文本检测+识别，关闭方向/扭曲矫正等子模块以提速、降依赖
-        logger.info("初始化 PaddleOCR(lang=%s)，模型缓存=%s ...", self._lang, cache)
-        self._ocr = PaddleOCR(
-            lang=self._lang,
-            use_doc_orientation_classify=False,
-            use_doc_unwarping=False,
-            use_textline_orientation=False,
+        kwargs: dict[str, object] = {
+            "use_doc_orientation_classify": False,
+            "use_doc_unwarping": False,
+            "use_textline_orientation": False,
+            "text_det_limit_side_len": self._det_limit_side_len,
+            "text_det_limit_type": "max",
+            "text_recognition_batch_size": self._rec_batch_size,
+            "device": "cpu",
+            "cpu_threads": self._cpu_threads,
+            "enable_hpi": False,
+            "enable_mkldnn": False,  # 禁用 mkldnn 避开 PIR+oneDNN bug
+        }
+        kwargs.update(self._model_kwargs(cache))
+
+        logger.info(
+            "初始化 PaddleOCR(lang=%s, version=%s, cpu_threads=%d, cache=%s)",
+            self._lang, self._ocr_version, self._cpu_threads, cache,
         )
+        self._ocr = PaddleOCR(**kwargs)
         return self._ocr
 
-    def recognize(self, image: np.ndarray) -> tuple[str, ...]:
+    def _model_kwargs(self, cache: Path) -> dict[str, object]:
+        names = _KNOWN_MODELS.get((self._lang, self._ocr_version))
+        if names is None:
+            return {"lang": self._lang, "ocr_version": self._ocr_version}
+
+        det_name, rec_name = names
+        kwargs: dict[str, object] = {
+            "text_detection_model_name": det_name,
+            "text_recognition_model_name": rec_name,
+        }
+        det_dir = _existing_model_dir(cache, det_name)
+        rec_dir = _existing_model_dir(cache, rec_name)
+        if det_dir is not None:
+            kwargs["text_detection_model_dir"] = str(det_dir)
+        if rec_dir is not None:
+            kwargs["text_recognition_model_dir"] = str(rec_dir)
+        return kwargs
+
+    def recognize(self, image: NDArray[np.uint8]) -> tuple[str, ...]:
+        return tuple(line.text for line in self.recognize_layout(image))
+
+    def recognize_layout(self, image: NDArray[np.uint8]) -> tuple[OcrLine, ...]:
         ocr = self._ensure()
-        results = ocr.predict(image)  # type: ignore[attr-defined]
-        lines: list[str] = []
+        results = cast(Iterable[Any], ocr.predict(image))  # type: ignore[attr-defined]
+        lines: list[OcrLine] = []
         for res in results:
-            # PaddleOCR 3.x 的结果对象为 dict 子类，文本行在 rec_texts 键下
             texts = res["rec_texts"] if "rec_texts" in res else []
-            lines.extend(t for t in texts if t and t.strip())
+            boxes = res["rec_boxes"] if "rec_boxes" in res else []
+            for index, raw_text in enumerate(texts):
+                text = str(raw_text).strip()
+                if text:
+                    lines.append(OcrLine(text=text, box=_box_at(boxes, index)))
         return tuple(lines)
+
+
+def _existing_model_dir(cache: Path, model_name: str) -> Path | None:
+    path = cache / _MODEL_DIR / model_name
+    return path if path.is_dir() else None
+
+
+def _box_at(boxes: object, index: int) -> BBox | None:
+    try:
+        raw = boxes[index]  # type: ignore[index]
+    except (IndexError, TypeError):
+        return None
+    if hasattr(raw, "tolist"):
+        raw = raw.tolist()
+    if not isinstance(raw, list | tuple) or len(raw) < 4:
+        return None
+    try:
+        x1, y1, x2, y2 = (int(round(float(value))) for value in raw[:4])
+    except (TypeError, ValueError):
+        return None
+    return (x1, y1, x2, y2)
 
 
 __all__ = ["TextRecognizer", "PaddleRecognizer"]

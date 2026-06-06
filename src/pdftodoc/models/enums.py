@@ -7,7 +7,7 @@ class PdfType(Enum):
     """PDF 内容类型，决定走哪条转换链路。"""
 
     TEXT = "text"        # 文本型：含文字图层，走 pdf2docx 保留版式
-    SCANNED = "scanned"  # 扫描型：纯图片，走 OCR
+    SCANNED = "scanned"  # 扫描型：纯图片，默认整页图片保留版式，可选 OCR
     MIXED = "mixed"      # 混合：部分页有文字，默认按 TEXT 处理并告警
     UNKNOWN = "unknown"  # 无法判定（如空文档）
 
@@ -19,7 +19,7 @@ class ConversionStage(Enum):
     DETECTING = "detecting"
     CONVERTING_TEXT = "converting_text"  # 文本型：pdf2docx 转换中
     RENDERING = "rendering"              # 扫描型：渲染页面为图片
-    RECOGNIZING = "recognizing"          # 扫描型：OCR 识别
+    RECOGNIZING = "recognizing"          # 扫描型可选：OCR 识别
     BUILDING_DOCX = "building_docx"       # 扫描型：生成 DOCX
     DONE = "done"
     FAILED = "failed"

@@ -21,16 +21,35 @@ echo "[build] 清理上次产物 ..."
 rm -rf build dist
 
 echo "[build] 运行 PyInstaller（onedir，GUI 无控制台）..."
-# Windows --add-data 用 ';' 分隔 源;目标；paddle 系列需 --collect-all 收齐数据/动态库
+# paddle 系列需 --collect-all 收齐数据/动态库
+SITE_PACKAGES="$(uv run python -c 'import sysconfig; k="purelib"; print(sysconfig.get_paths()[k])')"
 uv run pyinstaller \
     --name pdftodoc \
     --noconfirm \
     --windowed \
-    --add-data "assets;assets" \
     --collect-all paddleocr \
     --collect-all paddlex \
     --collect-all paddle \
     main.py
+
+# 修复1：paddle/libs DLL 路径
+echo "[build] 修复 paddle/libs DLL 路径 ..."
+PADDLE_INTERNAL="dist/pdftodoc/_internal/paddle"
+mkdir -p "${PADDLE_INTERNAL}/libs"
+for dll in "${PADDLE_INTERNAL}"/*.dll; do
+    [[ -f "$dll" ]] && cp -f "$dll" "${PADDLE_INTERNAL}/libs/"
+done
+
+# 修复2：批量复制所有 dist-info 到 _internal/
+echo "[build] 复制 dist-info 元数据到 _internal/ ..."
+INTERNAL="dist/pdftodoc/_internal"
+for d in "${SITE_PACKAGES}"/*.dist-info; do
+    [[ -d "$d" ]] && cp -rf "$d" "${INTERNAL}/"
+done
+
+# 修复3：复制 assets（含 OCR 模型）
+echo "[build] 复制 assets（含 OCR 模型）到产物目录 ..."
+cp -rf assets dist/pdftodoc/
 
 echo "[build] 完成。产物：dist/pdftodoc/pdftodoc.exe（日志: ${LOG_FILE}）"
 echo "[build] 提示：目标机需安装 VC++ Redistributable 方可运行。"

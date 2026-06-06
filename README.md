@@ -1,9 +1,11 @@
 # pdftodoc — Windows PDF 转 DOCX 工具
 
-桌面 GUI 工具，把 PDF 转换成可编辑的 DOCX。
+桌面 GUI 工具，把 PDF 转换成 DOCX。
 
 - **文本型 PDF**：用 [pdf2docx](https://pypi.org/project/pdf2docx/) 转换，保留版式。
-- **扫描型 / 纯图片 PDF**：逐页渲染 → [PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) 识别 → 生成 DOCX。
+- **扫描型 / 纯图片 PDF**：默认 OCR 重建可编辑文字/表格，并从原图裁剪公章补回。
+- OCR 默认使用中文 `PP-OCRv4_mobile` 轻量模型，避免 `PP-OCRv5_server`
+  在 CPU 机器上长时间卡顿；整页图片保真模式保留为可选兜底。
 
 ## 技术栈
 

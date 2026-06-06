@@ -3,7 +3,11 @@
     "allow": [
       "Bash(git -C /Users/stdnjl status)",
       "Bash(git -C /Users/stdnjl log --oneline -10)",
-      "Bash(./scripts/run.sh)"
+      "Bash(./scripts/run.sh)",
+      "Bash(./scripts/fetch_models.sh)",
+      "Bash(./scripts/build.sh)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(./pdftodoc.exe)"
     ]
   }
 }

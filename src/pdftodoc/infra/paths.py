@@ -25,12 +25,17 @@ def project_root() -> Path:
 
 
 def resource_dir() -> Path:
-    """只读资源根目录（assets/）。"""
+    """只读资源根目录（assets/）。打包态在 exe 同级（与 models_dir/logs_dir 一致）。"""
+    if is_frozen():
+        return Path(sys.executable).resolve().parent / "assets"
     return project_root() / "assets"
 
 
 def models_dir() -> Path:
-    """PaddleOCR 离线模型目录。"""
+    """PaddleOCR 离线模型目录（可写）。打包态指向 exe 同级，避免写入只读的 _MEIPASS。"""
+    if is_frozen():
+        base = Path(sys.executable).resolve().parent
+        return base / "assets" / "models"
     return resource_dir() / "models"
 
 

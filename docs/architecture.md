@@ -1,9 +1,10 @@
 # pdftodoc 架构说明
 
-桌面 GUI 工具，把 PDF 转换为可编辑 DOCX。按 PDF 内容自动选路：
+桌面 GUI 工具，把 PDF 转换为 DOCX。按 PDF 内容自动选路：
 
 - **文本型**（含文字图层）→ `pdf2docx`，保留版式。
-- **扫描型**（纯图片）→ 逐页渲染 + PaddleOCR 识别 → 生成 DOCX。
+- **扫描型**（纯图片）→ 默认 OCR 重建可编辑文字/表格，并从原图裁剪公章补回。
+  整页图片保真模式保留为可选兜底。
 
 ## 分层结构
 
@@ -34,14 +35,18 @@ ConversionService.convert(task)
   │  DETECTING      detector.detect() → DetectionResult
   ├─ 文本型/混合/未知 ─→ TextEngine          (CONVERTING_TEXT → DONE)
   └─ 扫描型/强制OCR ──→ OcrEngine
-                         每页: RENDERING → RECOGNIZING
-                         收尾: BUILDING_DOCX → DONE
+                         可编辑OCR: RENDERING → RECOGNIZING → BUILDING_DOCX → DONE
+                         整页图片:  RENDERING → BUILDING_DOCX → DONE
 ```
 
 - **类型判定**：抽样各页去空白字符数，按「平均字符数 + 有文字页占比」分类；
   大文件（>30 页）抽前/中/后各 5 页，避免检测过慢。混合型按文本型处理并告警。
-- **OCR 引擎**：`renderer.render_page`（PyMuPDF 按 DPI 渲染为 RGB numpy）→
-  `recognizer.recognize`（PaddleOCR）→ `docx_builder.build_docx`（python-docx 逐页分页）。
+- **OCR 重建**：默认使用 `renderer.render_page` →
+  `recognizer.recognize_layout`（PaddleOCR 文本+坐标）→ `table_detector.detect_tables` →
+  `seal_detector.detect_seals`（裁剪公章）→ `postprocess.clean_ocr_lines`（过滤公章碎字、
+  修正常见误识别）→ `docx_builder.build_docx`。
+- **整页图片兜底**：开启 `preserve_scan_layout` 时使用 `renderer.render_page_image` →
+  `docx_builder.build_image_docx`，视觉保真但文本不可编辑。
 - **取消**：在每页边界检查 `is_cancelled`，尽量即时响应。文本型受 pdf2docx 限制
   仅能在开始前取消（MVP 约束）。
 
@@ -56,7 +61,7 @@ GUI 用 `QObject + moveToThread` 把转换放到后台线程：
 
 `PaddleRecognizer` 在首次识别时把 `PADDLE_PDX_CACHE_HOME` 固定到 `assets/models/`，
 与 `scripts/fetch_models.sh` 预下载目录一致——预下载后即可断网运行。
-PaddleOCR 与 paddle 为重依赖，故识别器**懒加载**：无扫描件时不引入其开销。
+PaddleOCR 与 paddle 为重依赖，故识别器**懒加载**：文本型 PDF 与整页图片兜底模式不会加载 paddle。
 
 ## 设计约束
 

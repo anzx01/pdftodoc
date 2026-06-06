@@ -8,18 +8,28 @@
 
 import logging
 import time
+from collections.abc import Callable
+from typing import cast
 
 import fitz
+import numpy as np
+from numpy.typing import NDArray
 
 from pdftodoc.core.engines import CancelCheck, ProgressCallback
-from pdftodoc.core.ocr import OcrPage
-from pdftodoc.core.ocr.docx_builder import build_docx
+from pdftodoc.core.ocr import OcrLine, OcrPage, PageImage
+from pdftodoc.core.ocr.docx_builder import build_docx, build_image_docx
+from pdftodoc.core.ocr.postprocess import clean_ocr_lines, repair_cross_page_fields
 from pdftodoc.core.ocr.recognizer import PaddleRecognizer, TextRecognizer
-from pdftodoc.core.ocr.renderer import render_page
+from pdftodoc.core.ocr.renderer import (
+    render_page,
+    render_page_image,
+)
+from pdftodoc.core.ocr.seal_detector import detect_seals
+from pdftodoc.core.ocr.table_detector import detect_tables
 from pdftodoc.models.enums import ConversionStage, PdfType, TaskStatus
 from pdftodoc.models.progress import ProgressEvent
 from pdftodoc.models.result import ConversionResult, PageResult
-from pdftodoc.models.task import ConversionTask
+from pdftodoc.models.task import ConversionOptions, ConversionTask
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +41,15 @@ class OcrEngine:
         # 注入优先（测试用 fake）；否则首次转换时按任务语言懒创建 PaddleRecognizer
         self._recognizer = recognizer
 
-    def _get_recognizer(self, lang: str) -> TextRecognizer:
+    def _get_recognizer(self, opts: ConversionOptions) -> TextRecognizer:
         if self._recognizer is None:
-            self._recognizer = PaddleRecognizer(lang)
+            self._recognizer = PaddleRecognizer(
+                lang=opts.ocr_lang,
+                ocr_version=opts.ocr_version,
+                cpu_threads=opts.ocr_cpu_threads,
+                det_limit_side_len=opts.ocr_det_limit_side_len,
+                rec_batch_size=opts.ocr_rec_batch_size,
+            )
         return self._recognizer
 
     def convert(
@@ -52,7 +68,12 @@ class OcrEngine:
             if is_cancelled():
                 return self._cancelled(task, page_count)
 
-            recognizer = self._get_recognizer(opts.ocr_lang)
+            if opts.preserve_scan_layout:
+                return self._convert_as_page_images(
+                    task, doc, indices, page_count, on_progress, is_cancelled, started
+                )
+
+            recognizer = self._get_recognizer(opts)
             pages: list[OcrPage] = []
             page_results: list[PageResult] = []
             for step, page_index in enumerate(indices):
@@ -66,8 +87,25 @@ class OcrEngine:
                 self._emit(
                     on_progress, task, ConversionStage.RECOGNIZING, step + 1, total, page_index
                 )
-                lines = recognizer.recognize(image)
-                pages.append(OcrPage(page_index=page_index, lines=lines))
+                raw_lines = self._recognize_page(recognizer, image)
+                seals = detect_seals(image, page_index)
+                text_lines = clean_ocr_lines(raw_lines, seals)
+                lines = tuple(line.text for line in text_lines)
+                tables = detect_tables(image, text_lines)
+                page = doc[page_index]
+                pages.append(
+                    OcrPage(
+                        page_index=page_index,
+                        lines=lines,
+                        text_lines=text_lines,
+                        tables=tables,
+                        seals=seals,
+                        image_width_px=image.shape[1],
+                        image_height_px=image.shape[0],
+                        page_width_pt=page.rect.width,
+                        page_height_pt=page.rect.height,
+                    )
+                )
                 page_results.append(PageResult(
                     page_index=page_index,
                     char_count=sum(len(line) for line in lines),
@@ -76,6 +114,7 @@ class OcrEngine:
         finally:
             doc.close()
 
+        pages = list(repair_cross_page_fields(pages))
         on_progress(ProgressEvent(
             task.task_id, ConversionStage.BUILDING_DOCX, total, total, "生成 DOCX",
         ))
@@ -100,12 +139,66 @@ class OcrEngine:
             message="转换完成",
         )
 
+    def _convert_as_page_images(
+        self,
+        task: ConversionTask,
+        doc: "fitz.Document",
+        indices: list[int],
+        page_count: int,
+        on_progress: ProgressCallback,
+        is_cancelled: CancelCheck,
+        started: float,
+    ) -> ConversionResult:
+        total = len(indices)
+        images: list[PageImage] = []
+        page_results: list[PageResult] = []
+        for step, page_index in enumerate(indices):
+            if is_cancelled():
+                return self._cancelled(task, page_count)
+            self._emit(on_progress, task, ConversionStage.RENDERING, step, total, page_index)
+            images.append(render_page_image(doc, page_index, task.options.layout_render_dpi))
+            page_results.append(PageResult(page_index=page_index, char_count=0, line_count=0))
+
+        on_progress(ProgressEvent(
+            task.task_id, ConversionStage.BUILDING_DOCX, total, total, "生成版式 DOCX",
+        ))
+        build_image_docx(images, task.dst_docx)
+
+        on_progress(ProgressEvent(
+            task.task_id, ConversionStage.DONE, total, total, "转换完成",
+        ))
+        elapsed = time.monotonic() - started
+        logger.info(
+            "扫描型版式转换完成: %s -> %s (%d 页, %.1fs)",
+            task.src_pdf, task.dst_docx, total, elapsed,
+        )
+        return ConversionResult(
+            task_id=task.task_id,
+            status=TaskStatus.SUCCESS,
+            pdf_type=PdfType.SCANNED,
+            output_path=task.dst_docx,
+            page_count=page_count,
+            pages=tuple(page_results),
+            elapsed_sec=elapsed,
+            message="转换完成",
+        )
+
     @staticmethod
     def _page_indices(start: int, end: int | None, page_count: int) -> list[int]:
         """把 0 基的 start/end（含）裁剪到有效页范围，返回待处理页索引。"""
         first = max(0, start)
         last = page_count - 1 if end is None else min(end, page_count - 1)
         return list(range(first, last + 1)) if first <= last else []
+
+    @staticmethod
+    def _recognize_page(
+        recognizer: TextRecognizer, image: NDArray[np.uint8]
+    ) -> tuple[OcrLine, ...]:
+        layout_method = getattr(recognizer, "recognize_layout", None)
+        if callable(layout_method):
+            recognize_layout = cast(Callable[[NDArray[np.uint8]], tuple[OcrLine, ...]], layout_method)
+            return recognize_layout(image)
+        return tuple(OcrLine(text=text) for text in recognizer.recognize(image))
 
     @staticmethod
     def _emit(

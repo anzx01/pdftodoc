@@ -53,6 +53,12 @@ class OcrEngine:
             )
         return self._recognizer
 
+    def warm_up(self, opts: ConversionOptions) -> None:
+        """Initialize PaddleOCR before the first real editable conversion."""
+        recognizer = self._get_recognizer(opts)
+        image = np.full((64, 256, 3), 255, dtype=np.uint8)
+        self._recognize_page(recognizer, image)
+
     def convert(
         self,
         task: ConversionTask,

@@ -5,16 +5,16 @@
 
 import dataclasses
 import logging
+import threading
 import traceback
 from collections.abc import Callable
+from typing import Protocol
 
-from pdftodoc.core import detector
 from pdftodoc.core.engines import CancelCheck, ProgressCallback
-from pdftodoc.core.engines.text_engine import TextEngine
 from pdftodoc.models.enums import ConversionStage, PdfType, TaskStatus
 from pdftodoc.models.progress import ErrorInfo, ProgressEvent
 from pdftodoc.models.result import ConversionResult, DetectionResult
-from pdftodoc.models.task import ConversionTask
+from pdftodoc.models.task import ConversionOptions, ConversionTask
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,16 @@ _TEXT_TYPES = {PdfType.TEXT, PdfType.MIXED, PdfType.UNKNOWN}
 
 # 检测完成回调（可选，便于 UI 提早显示 PDF 类型）
 DetectCallback = Callable[[DetectionResult], None]
+
+
+class _ConversionEngine(Protocol):
+    def convert(
+        self,
+        task: ConversionTask,
+        on_progress: ProgressCallback,
+        is_cancelled: CancelCheck,
+    ) -> ConversionResult:
+        ...
 
 
 def _noop_progress(_: ProgressEvent) -> None:
@@ -37,14 +47,50 @@ class ConversionService:
     """转换编排器。OCR 引擎按需懒加载，避免无扫描件时引入 paddle 开销。"""
 
     def __init__(self) -> None:
-        self._text_engine = TextEngine()
-        self._ocr_engine: object | None = None
+        self._text_engine: _ConversionEngine | None = None
+        self._fast_text_engine: _ConversionEngine | None = None
+        self._precise_text_engine: _ConversionEngine | None = None
+        self._ocr_engine: _ConversionEngine | None = None
+        self._text_lock = threading.Lock()
+        self._ocr_lock = threading.RLock()
 
-    def _get_ocr_engine(self) -> object:
-        if self._ocr_engine is None:
-            from pdftodoc.core.engines.ocr_engine import OcrEngine
-            self._ocr_engine = OcrEngine()
-        return self._ocr_engine
+    def _get_text_engine(self, *, fast: bool) -> _ConversionEngine:
+        with self._text_lock:
+            if self._text_engine is not None:
+                return self._text_engine
+            if fast:
+                if self._fast_text_engine is None:
+                    from pdftodoc.core.engines.fast_text_engine import FastTextEngine
+
+                    self._fast_text_engine = FastTextEngine()
+                return self._fast_text_engine
+            if self._precise_text_engine is None:
+                from pdftodoc.core.engines.text_engine import TextEngine
+
+                self._precise_text_engine = TextEngine()
+            return self._precise_text_engine
+
+    def _get_ocr_engine(self) -> _ConversionEngine:
+        with self._ocr_lock:
+            if self._ocr_engine is None:
+                from pdftodoc.core.engines.ocr_engine import OcrEngine
+
+                self._ocr_engine = OcrEngine()
+            return self._ocr_engine
+
+    def prewarm_ocr(self, options: ConversionOptions | None = None) -> None:
+        """Load and run OCR once in the background so first editable scan conversion is faster."""
+        with self._ocr_lock:
+            engine = self._get_ocr_engine()
+            warm_up = getattr(engine, "warm_up", None)
+            if callable(warm_up):
+                warm_up(options or ConversionOptions())
+
+    @staticmethod
+    def _detect(task: ConversionTask) -> DetectionResult:
+        from pdftodoc.core import detector
+
+        return detector.detect(str(task.src_pdf), task.options)
 
     def convert(
         self,
@@ -58,7 +104,7 @@ class ConversionService:
         cancelled = is_cancelled or _never_cancelled
 
         progress(ProgressEvent(task.task_id, ConversionStage.DETECTING, 0, 1, "检测 PDF 类型"))
-        detection = detector.detect(str(task.src_pdf), task.options)
+        detection = self._detect(task)
         if on_detected is not None:
             on_detected(detection)
 
@@ -70,10 +116,11 @@ class ConversionService:
             logger.warning("检测为混合型，按文本型处理；部分页面可能是图片")
 
         if use_text:
-            result = self._text_engine.convert(task, progress, cancelled)
+            fast_text = task.options.text_fast_layout and detection.pdf_type is PdfType.TEXT
+            result = self._get_text_engine(fast=fast_text).convert(task, progress, cancelled)
         else:
-            engine = self._get_ocr_engine()
-            result = engine.convert(task, progress, cancelled)  # type: ignore[attr-defined]
+            with self._ocr_lock:
+                result = self._get_ocr_engine().convert(task, progress, cancelled)
 
         # 用真实检测类型覆盖引擎默认值（例如 MIXED 应如实反映）
         return dataclasses.replace(result, pdf_type=detection.pdf_type)

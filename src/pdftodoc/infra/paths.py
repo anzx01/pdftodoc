@@ -1,6 +1,7 @@
 """路径与资源定位。兼容开发态与 PyInstaller 打包态（sys._MEIPASS）。"""
 
 import sys
+import os
 from pathlib import Path
 
 
@@ -25,24 +26,22 @@ def project_root() -> Path:
 
 
 def resource_dir() -> Path:
-    """只读资源根目录（assets/）。打包态在 exe 同级（与 models_dir/logs_dir 一致）。"""
-    if is_frozen():
-        return Path(sys.executable).resolve().parent / "assets"
+    """只读资源根目录（assets/）。PyInstaller 单文件态来自 _MEIPASS。"""
+    mei = _meipass()
+    if mei is not None:
+        return mei / "assets"
     return project_root() / "assets"
 
 
 def models_dir() -> Path:
-    """PaddleOCR 离线模型目录（可写）。打包态指向 exe 同级，避免写入只读的 _MEIPASS。"""
-    if is_frozen():
-        base = Path(sys.executable).resolve().parent
-        return base / "assets" / "models"
+    """PaddleOCR 离线模型目录。单文件 exe 中随资源解压，无需额外 assets 目录。"""
     return resource_dir() / "models"
 
 
 def logs_dir() -> Path:
-    """日志输出目录（可写）。打包态写到 exe 同级，避免写入临时只读目录。"""
+    """日志输出目录（可写）。打包态写入用户本地数据目录，不污染 exe 同级目录。"""
     if is_frozen():
-        base = Path(sys.executable).resolve().parent
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home())) / "pdftodoc"
     else:
         base = project_root()
     path = base / "logs"

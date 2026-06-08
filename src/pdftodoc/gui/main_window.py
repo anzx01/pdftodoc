@@ -1,9 +1,10 @@
 """主窗口：组装控件，管理 QThread 生命周期，连接 worker 信号到 UI。"""
 
 import logging
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import QThread
+from PySide6.QtCore import QThread, QTimer
 from PySide6.QtWidgets import (
     QFileDialog,
     QMainWindow,
@@ -18,7 +19,7 @@ from pdftodoc.gui.worker import ConversionWorker
 from pdftodoc.models.enums import TaskStatus
 from pdftodoc.models.progress import ErrorInfo, ProgressEvent
 from pdftodoc.models.result import ConversionResult, DetectionResult
-from pdftodoc.models.task import ConversionTask
+from pdftodoc.models.task import ConversionOptions, ConversionTask
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
         self._service = ConversionService()
         self._thread: QThread | None = None
         self._worker: ConversionWorker | None = None
+        self._prewarm_started = False
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -48,6 +50,7 @@ class MainWindow(QMainWindow):
         self._controls.convert_clicked.connect(self._start)
         self._controls.cancel_clicked.connect(self._request_cancel)
         self._controls.output_browse_clicked.connect(self._choose_output)
+        QTimer.singleShot(3000, self._start_ocr_prewarm)
 
     # ---- 输入处理 ----
     def _on_file_selected(self, path: str) -> None:
@@ -68,7 +71,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请先选择一个 PDF 文件")
             return
         dst = self._controls.output_path() or str(Path(src).with_suffix(".docx"))
-        task = ConversionTask(Path(src), Path(dst))
+        options = ConversionOptions(
+            text_fast_layout=not self._controls.precise_text_layout(),
+        )
+        task = ConversionTask(Path(src), Path(dst), options)
         self._controls.set_running(True)
         self._progress.reset()
         self._progress.append_log(f"开始转换：{src}")
@@ -90,6 +96,27 @@ class MainWindow(QMainWindow):
         thread.finished.connect(self._on_thread_finished)
         self._thread, self._worker = thread, worker
         thread.start()
+
+    def _start_ocr_prewarm(self) -> None:
+        if self._prewarm_started:
+            return
+        if self._thread is not None:
+            QTimer.singleShot(3000, self._start_ocr_prewarm)
+            return
+        self._prewarm_started = True
+        thread = threading.Thread(
+            target=self._prewarm_ocr,
+            name="pdftodoc-ocr-prewarm",
+            daemon=True,
+        )
+        thread.start()
+
+    def _prewarm_ocr(self) -> None:
+        try:
+            self._service.prewarm_ocr()
+            logger.info("OCR 预热完成")
+        except Exception:
+            logger.exception("OCR 预热失败")
 
     def _request_cancel(self) -> None:
         if self._worker is not None:

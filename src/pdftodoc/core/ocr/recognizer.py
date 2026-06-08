@@ -5,8 +5,9 @@ PaddleOCR 是重依赖且首次初始化很慢，故在此懒加载并集中隔�
 
 import logging
 import os
-from pathlib import Path
+import threading
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, Protocol, cast
 
 import numpy as np
@@ -47,39 +48,44 @@ class PaddleRecognizer:
         self._det_limit_side_len = det_limit_side_len
         self._rec_batch_size = rec_batch_size
         self._ocr: object | None = None
+        self._lock = threading.Lock()
 
     def _ensure(self) -> object:
         if self._ocr is not None:
             return self._ocr
 
-        cache = models_dir()
-        cache.mkdir(parents=True, exist_ok=True)
-        os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(cache))
-        os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+        with self._lock:
+            if self._ocr is not None:
+                return self._ocr
 
-        from paddleocr import PaddleOCR
+            cache = models_dir()
+            cache.mkdir(parents=True, exist_ok=True)
+            os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(cache))
+            os.environ.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
 
-        cpu_threads = _resolve_cpu_threads(self._cpu_threads)
-        kwargs: dict[str, object] = {
-            "use_doc_orientation_classify": False,
-            "use_doc_unwarping": False,
-            "use_textline_orientation": False,
-            "text_det_limit_side_len": self._det_limit_side_len,
-            "text_det_limit_type": "max",
-            "text_recognition_batch_size": self._rec_batch_size,
-            "device": "cpu",
-            "cpu_threads": cpu_threads,
-            "enable_hpi": False,
-            "enable_mkldnn": False,  # 禁用 mkldnn 避开 PIR+oneDNN bug
-        }
-        kwargs.update(self._model_kwargs(cache))
+            from paddleocr import PaddleOCR
 
-        logger.info(
-            "初始化 PaddleOCR(lang=%s, version=%s, cpu_threads=%d, cache=%s)",
-            self._lang, self._ocr_version, cpu_threads, cache,
-        )
-        self._ocr = PaddleOCR(**kwargs)
-        return self._ocr
+            cpu_threads = _resolve_cpu_threads(self._cpu_threads)
+            kwargs: dict[str, object] = {
+                "use_doc_orientation_classify": False,
+                "use_doc_unwarping": False,
+                "use_textline_orientation": False,
+                "text_det_limit_side_len": self._det_limit_side_len,
+                "text_det_limit_type": "max",
+                "text_recognition_batch_size": self._rec_batch_size,
+                "device": "cpu",
+                "cpu_threads": cpu_threads,
+                "enable_hpi": False,
+                "enable_mkldnn": False,  # 禁用 mkldnn 避开 PIR+oneDNN bug
+            }
+            kwargs.update(self._model_kwargs(cache))
+
+            logger.info(
+                "初始化 PaddleOCR(lang=%s, version=%s, cpu_threads=%d, cache=%s)",
+                self._lang, self._ocr_version, cpu_threads, cache,
+            )
+            self._ocr = PaddleOCR(**kwargs)
+            return self._ocr
 
     def _model_kwargs(self, cache: Path) -> dict[str, object]:
         names = _KNOWN_MODELS.get((self._lang, self._ocr_version))
@@ -126,7 +132,7 @@ def _resolve_cpu_threads(requested: int) -> int:
     if requested > 0:
         return requested
     cpu_count = os.cpu_count() or 4
-    return max(2, min(8, cpu_count - 2 if cpu_count > 4 else cpu_count))
+    return max(2, min(4, cpu_count - 2 if cpu_count > 4 else cpu_count))
 
 
 def _box_at(boxes: object, index: int) -> BBox | None:

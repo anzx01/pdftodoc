@@ -3,8 +3,10 @@
 from pathlib import Path
 
 import pytest
+from docx import Document
 
 from pdftodoc.core.engines import text_engine
+from pdftodoc.core.engines.fast_text_engine import FastTextEngine
 from pdftodoc.core.engines.text_engine import TextEngine
 from pdftodoc.core.service import ConversionService
 from pdftodoc.models.enums import PdfType, TaskStatus
@@ -18,6 +20,23 @@ def test_text_conversion_end_to_end(text_pdf: Path, tmp_path: Path) -> None:
     assert result.pdf_type is PdfType.TEXT
     assert dst.exists() and dst.stat().st_size > 0
     assert result.page_count == 2
+
+
+def test_fast_text_engine_writes_editable_layout_text(text_pdf: Path, tmp_path: Path) -> None:
+    dst = tmp_path / "fast.docx"
+    result = FastTextEngine().convert(
+        ConversionTask(text_pdf, dst),
+        lambda _: None,
+        lambda: False,
+    )
+
+    assert result.status is TaskStatus.SUCCESS
+    assert dst.exists() and dst.stat().st_size > 0
+    doc = Document(str(dst))
+    text = "\n".join(paragraph.text for paragraph in doc.paragraphs)
+    assert "Hello World" in text
+    assert len(doc.inline_shapes) == 0
+    assert doc.sections[0].page_width.pt > 0
 
 
 def test_text_engine_enables_multiprocessing_for_larger_documents(

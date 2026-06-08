@@ -42,7 +42,7 @@ def test_paddle_recognizer_uses_local_mobile_models(
     assert created["text_det_limit_side_len"] == 960
     assert created["text_det_limit_type"] == "max"
     assert created["text_recognition_batch_size"] == 8
-    assert created["cpu_threads"] == 8
+    assert created["cpu_threads"] == 4
     assert created["enable_mkldnn"] is False
     assert "lang" not in created
     assert "ocr_version" not in created

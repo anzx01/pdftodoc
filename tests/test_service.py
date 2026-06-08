@@ -33,6 +33,15 @@ class FakeEngine:
         )
 
 
+class FakeWarmEngine(FakeEngine):
+    def __init__(self, name: str) -> None:
+        super().__init__(name)
+        self.warmed = False
+
+    def warm_up(self, options: object) -> None:
+        self.warmed = True
+
+
 def _patch_detect(monkeypatch: pytest.MonkeyPatch, pdf_type: PdfType) -> None:
     def fake_detect(path: str, options: object) -> DetectionResult:
         return DetectionResult(pdf_type, 1, 100, 100.0, 1.0)
@@ -82,3 +91,14 @@ def test_cancel_before_convert(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) 
     result = svc.convert(_task(tmp_path), is_cancelled=lambda: True)
     assert result.status is TaskStatus.CANCELLED
     assert not text_fake.called
+
+
+def test_prewarm_ocr_does_not_convert() -> None:
+    svc = ConversionService()
+    ocr_fake = FakeWarmEngine("ocr")
+    svc._ocr_engine = ocr_fake  # 避免加载真实 PaddleOCR
+
+    svc.prewarm_ocr()
+
+    assert ocr_fake.warmed
+    assert not ocr_fake.called

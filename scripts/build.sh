@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# PyInstaller 打包为 Windows 可执行（onedir 模式，便于排查依赖与加载离线模型）。
-# 产物在 dist/pdftodoc/，连同 assets/（含已下载的 OCR 模型）一并分发。
+# PyInstaller onefile build. The output is a single GUI executable:
+#   dist/pdftodoc.exe
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -11,37 +11,24 @@ mkdir -p logs
 LOG_FILE="logs/build_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
-if [[ ! -d "assets/models" || -z "$(ls -A assets/models 2>/dev/null)" ]]; then
-    echo "[build] !! assets/models 为空。请先运行 scripts/fetch_models.sh 预下载 OCR 模型，"
-    echo "[build]    否则打包产物在断网机器上无法识别扫描件。"
-    exit 1
-fi
+for model in PP-OCRv4_mobile_det PP-OCRv4_mobile_rec; do
+    if [[ ! -d "assets/models/official_models/${model}" ]]; then
+        echo "[build] Missing OCR model: assets/models/official_models/${model}"
+        echo "[build] Run scripts/fetch_models.sh first."
+        exit 1
+    fi
+done
 
-echo "[build] 清理上次产物 ..."
+echo "[build] Cleaning previous build outputs ..."
 rm -rf build dist
 
-echo "[build] 运行 PyInstaller（onedir，GUI 无控制台）..."
-SITE_PACKAGES="$(uv run python -c 'import sysconfig; k="purelib"; print(sysconfig.get_paths()[k])')"
-uv run pyinstaller --noconfirm pdftodoc.spec
+echo "[build] Building onefile GUI executable ..."
+if [[ -x ".venv/Scripts/python.exe" ]]; then
+    PYTHON=".venv/Scripts/python.exe"
+else
+    PYTHON="python"
+fi
+"${PYTHON}" -m PyInstaller --noconfirm --clean pdftodoc.spec
 
-# 修复1：paddle/libs DLL 路径
-echo "[build] 修复 paddle/libs DLL 路径 ..."
-PADDLE_INTERNAL="dist/pdftodoc/_internal/paddle"
-mkdir -p "${PADDLE_INTERNAL}/libs"
-for dll in "${PADDLE_INTERNAL}"/*.dll; do
-    [[ -f "$dll" ]] && cp -f "$dll" "${PADDLE_INTERNAL}/libs/"
-done
-
-# 修复2：批量复制所有 dist-info 到 _internal/
-echo "[build] 复制 dist-info 元数据到 _internal/ ..."
-INTERNAL="dist/pdftodoc/_internal"
-for d in "${SITE_PACKAGES}"/*.dist-info; do
-    [[ -d "$d" ]] && cp -rf "$d" "${INTERNAL}/"
-done
-
-# 修复3：复制 assets（含 OCR 模型）
-echo "[build] 复制 assets（含 OCR 模型）到产物目录 ..."
-cp -rf assets dist/pdftodoc/
-
-echo "[build] 完成。产物：dist/pdftodoc/pdftodoc.exe（日志: ${LOG_FILE}）"
-echo "[build] 提示：目标机需安装 VC++ Redistributable 方可运行。"
+echo "[build] Done: dist/pdftodoc.exe"
+echo "[build] Log: ${LOG_FILE}"

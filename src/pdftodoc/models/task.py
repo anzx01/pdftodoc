@@ -14,6 +14,7 @@ class ConversionOptions:
     ocr_cpu_threads: int = 0           # OCR CPU 线程数；0 表示按本机 CPU 自动提速
     ocr_det_limit_side_len: int = 960  # 文本检测最长边限制，降低扫描件推理成本
     ocr_rec_batch_size: int = 8        # 文本识别批大小，兼顾速度与内存
+    text_fast_layout: bool = True      # 文本型 PDF 走坐标版式快速转换，保持文字可编辑
     text_multi_processing: bool = True # 文本型 PDF 页数较多时启用 pdf2docx 多进程
     text_cpu_count: int = 0            # 文本型 PDF 转换进程数；0 表示按本机 CPU 自动选择
     text_multi_process_min_pages: int = 8  # 小文件不开多进程，避免启动成本反而变慢

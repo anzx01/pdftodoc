@@ -2,6 +2,7 @@
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -34,6 +35,9 @@ class Controls(QWidget):
         layout.addLayout(row)
 
         btns = QHBoxLayout()
+        self._precise_text_layout = QCheckBox("精准版式")
+        self._precise_text_layout.setToolTip("复杂图文 PDF 使用精细转换，速度较慢。")
+        btns.addWidget(self._precise_text_layout)
         btns.addStretch(1)
         self._convert_btn = QPushButton("开始转换")
         self._convert_btn.clicked.connect(self.convert_clicked)
@@ -50,9 +54,13 @@ class Controls(QWidget):
     def set_output_path(self, path: str) -> None:
         self._output_edit.setText(path)
 
+    def precise_text_layout(self) -> bool:
+        return self._precise_text_layout.isChecked()
+
     def set_running(self, running: bool) -> None:
         """转换进行中：禁用输入与开始按钮，启用取消。"""
         self._convert_btn.setEnabled(not running)
         self._cancel_btn.setEnabled(running)
         self._out_btn.setEnabled(not running)
         self._output_edit.setEnabled(not running)
+        self._precise_text_layout.setEnabled(not running)

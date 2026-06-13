@@ -16,6 +16,7 @@ class DetectionResult:
     avg_chars_per_page: float
     text_page_ratio: float                 # 有可观文字的页面占比
     sampled_pages: tuple[int, ...] = ()     # 实际参与统计的页索引（大文件抽样）
+    has_embedded_images: bool = False       # 是否含嵌入图片块（需要 pdf2docx 处理）
 
 
 @dataclass(frozen=True)

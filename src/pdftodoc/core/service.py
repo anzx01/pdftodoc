@@ -51,8 +51,17 @@ class ConversionService:
         self._fast_text_engine: _ConversionEngine | None = None
         self._precise_text_engine: _ConversionEngine | None = None
         self._ocr_engine: _ConversionEngine | None = None
+        self._overlay_engine: _ConversionEngine | None = None
         self._text_lock = threading.Lock()
         self._ocr_lock = threading.RLock()
+
+    def _get_overlay_engine(self) -> _ConversionEngine:
+        with self._text_lock:
+            if self._overlay_engine is None:
+                from pdftodoc.core.engines.overlay_engine import OverlayEngine
+
+                self._overlay_engine = OverlayEngine()
+            return self._overlay_engine
 
     def _get_text_engine(self, *, fast: bool) -> _ConversionEngine:
         with self._text_lock:
@@ -116,8 +125,13 @@ class ConversionService:
             logger.warning("检测为混合型，按文本型处理；部分页面可能是图片")
 
         if use_text:
-            fast_text = task.options.text_fast_layout and detection.pdf_type is PdfType.TEXT
-            result = self._get_text_engine(fast=fast_text).convert(task, progress, cancelled)
+            if detection.has_embedded_images:
+                # 含嵌入图片时用 Overlay 引擎：图片精确锚定，文字用浮动文本框对齐原坐标
+                logger.info("检测到嵌入图片，使用 Overlay 引擎精确还原图文布局")
+                result = self._get_overlay_engine().convert(task, progress, cancelled)
+            else:
+                fast_text = task.options.text_fast_layout and detection.pdf_type is PdfType.TEXT
+                result = self._get_text_engine(fast=fast_text).convert(task, progress, cancelled)
         else:
             with self._ocr_lock:
                 result = self._get_ocr_engine().convert(task, progress, cancelled)

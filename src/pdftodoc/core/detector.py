@@ -54,7 +54,13 @@ def detect(pdf_path: str, options: ConversionOptions) -> DetectionResult:
             return DetectionResult(PdfType.UNKNOWN, 0, 0, 0.0, 0.0)
 
         sample = _select_sample(page_count, options)
-        char_counts = [len(_WS.sub("", doc[i].get_text("text"))) for i in sample]
+        char_counts = []
+        has_images = False
+        for i in sample:
+            page = doc[i]
+            char_counts.append(len(_WS.sub("", page.get_text("text"))))
+            if not has_images:
+                has_images = any(b["type"] == 1 for b in page.get_text("dict")["blocks"])
     finally:
         doc.close()
 
@@ -65,8 +71,8 @@ def detect(pdf_path: str, options: ConversionOptions) -> DetectionResult:
 
     pdf_type = PdfType.SCANNED if options.force_ocr else _classify(avg, ratio, options)
     logger.info(
-        "检测结果: 类型=%s 总页=%d 抽样=%d 平均字符=%.1f 文字页占比=%.2f",
-        pdf_type.value, page_count, len(sample), avg, ratio,
+        "检测结果: 类型=%s 总页=%d 抽样=%d 平均字符=%.1f 文字页占比=%.2f 含图片=%s",
+        pdf_type.value, page_count, len(sample), avg, ratio, has_images,
     )
     return DetectionResult(
         pdf_type=pdf_type,
@@ -75,4 +81,5 @@ def detect(pdf_path: str, options: ConversionOptions) -> DetectionResult:
         avg_chars_per_page=avg,
         text_page_ratio=ratio,
         sampled_pages=sample,
+        has_embedded_images=has_images,
     )

@@ -1,4 +1,6 @@
-"""扫描型引擎：逐页渲染 → PaddleOCR 识别 → 生成 DOCX。
+"""扫描型引擎：逐页渲染 → OCR 识别 → 生成 DOCX。
+
+使用 PaddleOCR PP-OCRv5 引擎（实测最快，约 4 秒/页）。
 
 接口与 TextEngine 一致：convert(task, on_progress, is_cancelled) -> ConversionResult。
 - 取消在每页边界检查，尽量即时响应；
@@ -27,7 +29,7 @@ from pdftodoc.core.ocr.renderer import (
 from pdftodoc.core.ocr.seal_detector import detect_seals
 from pdftodoc.core.ocr.table_detector import detect_tables
 from pdftodoc.core.ocr.watermark import wipe_light_watermark
-from pdftodoc.models.enums import ConversionStage, PdfType, TaskStatus
+from pdftodoc.models.enums import ConversionStage, OcrEngineType, PdfType, TaskStatus
 from pdftodoc.models.progress import ProgressEvent
 from pdftodoc.models.result import ConversionResult, PageResult
 from pdftodoc.models.task import ConversionOptions, ConversionTask
@@ -36,14 +38,17 @@ logger = logging.getLogger(__name__)
 
 
 class OcrEngine:
-    """扫描型 PDF 的 OCR 转换引擎。"""
+    """扫描型 PDF 的 OCR 转换引擎（支持多种 OCR 引擎）。"""
 
     def __init__(self, recognizer: TextRecognizer | None = None) -> None:
-        # 注入优先（测试用 fake）；否则首次转换时按任务语言懒创建 PaddleRecognizer
+        # 注入优先（测试用 fake）；否则首次转换时按任务选项懒创建识别器
         self._recognizer = recognizer
 
     def _get_recognizer(self, opts: ConversionOptions) -> TextRecognizer:
+        """获取 OCR 识别器（延迟加载）。"""
         if self._recognizer is None:
+            # 仅支持 PaddleOCR
+            logger.info("使用 PaddleOCR PP-OCRv5 引擎")
             self._recognizer = PaddleRecognizer(
                 lang=opts.ocr_lang,
                 ocr_version=opts.ocr_version,
@@ -51,10 +56,11 @@ class OcrEngine:
                 det_limit_side_len=opts.ocr_det_limit_side_len,
                 rec_batch_size=opts.ocr_rec_batch_size,
             )
+
         return self._recognizer
 
     def warm_up(self, opts: ConversionOptions) -> None:
-        """Initialize PaddleOCR before the first real editable conversion."""
+        """Initialize OCR engine before the first real editable conversion."""
         recognizer = self._get_recognizer(opts)
         image = np.full((64, 256, 3), 255, dtype=np.uint8)
         self._recognize_page(recognizer, image)

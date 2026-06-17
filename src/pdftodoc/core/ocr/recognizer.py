@@ -19,6 +19,7 @@ from pdftodoc.infra.paths import models_dir
 logger = logging.getLogger(__name__)
 
 _MODEL_DIR = "official_models"
+# PP-OCRv4 使用预下载的 mobile 模型；PP-OCRv5 让 PaddleOCR 自动选择 server 模型
 _KNOWN_MODELS = {
     ("ch", "PP-OCRv4"): ("PP-OCRv4_mobile_det", "PP-OCRv4_mobile_rec"),
 }
@@ -37,10 +38,10 @@ class PaddleRecognizer:
     def __init__(
         self,
         lang: str = "ch",
-        ocr_version: str = "PP-OCRv4",
+        ocr_version: str = "PP-OCRv5",
         cpu_threads: int = 0,
-        det_limit_side_len: int = 960,
-        rec_batch_size: int = 8,
+        det_limit_side_len: int = 1920,
+        rec_batch_size: int = 6,
     ) -> None:
         self._lang = lang
         self._ocr_version = ocr_version

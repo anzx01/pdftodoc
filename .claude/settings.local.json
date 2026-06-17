@@ -7,7 +7,12 @@
       "Bash(./scripts/fetch_models.sh)",
       "Bash(./scripts/build.sh)",
       "Bash(.venv/Scripts/python.exe -c ' *)",
-      "Bash(./pdftodoc.exe)"
+      "Bash(./pdftodoc.exe)",
+      "Read(//c/Users/admin/Desktop/天津验收/**)",
+      "Bash(bash scripts/run.sh)",
+      "Bash(python -c ' *)",
+      "Bash(bash scripts/test_convert.sh)",
+      "Bash(bash *)"
     ]
   }
 }

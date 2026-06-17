@@ -6,7 +6,7 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 
 ROOT = Path.cwd()
-MODEL_NAMES = ("PP-OCRv4_mobile_det", "PP-OCRv4_mobile_rec")
+MODEL_NAMES = ("PP-OCRv5_server_det", "PP-OCRv5_server_rec")
 
 
 def model_datas():

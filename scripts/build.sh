@@ -11,7 +11,7 @@ mkdir -p logs
 LOG_FILE="logs/build_$(date +%Y%m%d_%H%M%S).log"
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
-for model in PP-OCRv4_mobile_det PP-OCRv4_mobile_rec; do
+for model in PP-OCRv5_server_det PP-OCRv5_server_rec; do
     if [[ ! -d "assets/models/official_models/${model}" ]]; then
         echo "[build] Missing OCR model: assets/models/official_models/${model}"
         echo "[build] Run scripts/fetch_models.sh first."
